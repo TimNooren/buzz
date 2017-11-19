@@ -6,7 +6,7 @@ import os
 from base64 import b64encode
 
 from bokchoi import common
-
+from bokchoi.scheduler import Scheduler
 
 USER_DATA = """#!/bin/bash
 
@@ -85,17 +85,18 @@ class EC2(object):
 
         cwd = os.getcwd()
         package, fingerprint = common.zip_package(cwd, self.requirements)
-        common.upload_zip(bucket_name, package, self.package_name, fingerprint)
+        common.upload_to_s3(bucket_name, package, self.package_name, fingerprint)
 
         policies = self.create_policies(self.custom_policy)
 
         self.create_default_role_and_profile(policies)
 
-        if self.schedule:
-            common.create_scheduler(self.project_id, self.project_name, self.settings)
-        else:
-            common.delete_scheduler(self.project_id)
-            common.delete_cloudwatch_rule(self.project_id + '-schedule-event')
+        if self.settings.get('Schedule'):
+            scheduler = Scheduler(self.project_id
+                                  , self.project_name
+                                  , self.settings.get('Schedule')
+                                  , self.settings.get('Requirements'))
+            scheduler.deploy()
 
     def undeploy(self):
         """Deletes all policies, users, and instances permanently"""
@@ -114,8 +115,11 @@ class EC2(object):
         for role in common.get_roles(self.project_id):
             common.delete_role(role)
 
-        common.delete_scheduler(self.project_id)
-        common.delete_cloudwatch_rule(self.project_id + '-schedule-event')
+        scheduler = Scheduler(self.project_id
+                              , self.project_name
+                              , self.settings.get('Schedule')
+                              , self.settings.get('Requirements'))
+        scheduler.undeploy()
 
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""

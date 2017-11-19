@@ -6,9 +6,6 @@ import os
 import json
 import hashlib
 
-from bokchoi import ec2
-from bokchoi import emr
-
 import boto3
 from botocore.exceptions import ClientError
 
@@ -22,73 +19,6 @@ iam_resource = session.resource('iam')
 
 s3_client = session.client('s3')
 s3_resource = session.resource('s3')
-
-lambda_client = session.client('lambda')
-
-events_client = session.client('events')
-
-SCHEDULER_TRUST_POLICY = """{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "lambda.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}"""
-
-
-SCHEDULER_POLICY = """{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": [
-       "ec2:DescribeImages",
-       "ec2:DescribeSubnets",
-       "ec2:RequestSpotInstances",
-       "ec2:TerminateInstances",
-       "ec2:DescribeInstanceStatus",
-       "ec2:DescribeSecurityGroups",
-       "ec2:DescribeSpotInstanceRequests",
-       "ec2:CreateTags",
-       "iam:PassRole",
-       "elasticmapreduce:RunJobFlow",
-       "elasticmapreduce:AddJobFlowSteps"
-        ],
-    "Resource": ["*"]
-  }]
-}"""
-
-EVENT_POLICY = """{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "lambda:InvokeFunction"
-      ],
-      "Resource": "*"
-    }
-  ]
-}"""
-
-EVENT_TRUST_POLICY = """{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "events.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}"""
 
 
 def get_aws_account_id():
@@ -117,16 +47,17 @@ def create_bucket(region, bucket_name):
     return bucket_name
 
 
-def upload_zip(bucket_name, zip_file, zip_file_name, fingerprint):
-    """ Uploads zip file to S3
-    :param bucket_name:             Bucket name
-    :param zip_file:                Zipped file
-    :param zip_file_name:           Name of zip file in S3
+def upload_to_s3(bucket_name, file_object, file_name, fingerprint):
+    """ Uploads file to S3
+    :param bucket_name:                 Bucket name
+    :param file_object:                 File to upload
+    :param file_name:                   Name of zip file in S3
+    :param fingerprint:                 Fingerprint of file_object
     """
     bucket = s3_resource.Bucket(bucket_name)
 
     try:
-        cur_fingerprint = bucket.Object(zip_file_name).metadata.get('fingerprint')
+        cur_fingerprint = bucket.Object(file_name).metadata.get('fingerprint')
     except ClientError as e:
         if e.response['Error']['Message'] == 'Not Found':
             print('No package deployed yet. Uploading.')
@@ -139,7 +70,7 @@ def upload_zip(bucket_name, zip_file, zip_file_name, fingerprint):
         else:
             print('Local package does not match deployed. Uploading')
 
-    bucket.put_object(Body=zip_file, Key=zip_file_name, Metadata={'fingerprint': fingerprint})
+    bucket.put_object(Body=file_object, Key=file_name, Metadata={'fingerprint': fingerprint})
 
 
 def retry(func, **kwargs):
@@ -171,16 +102,17 @@ def create_instance_profile(profile_name, role_name=None):
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
             print('Instance profile already exists ' + profile_name)
+            return
         else:
             raise e
-    else:
-        if role_name:
-            iam_client.add_role_to_instance_profile(
-                InstanceProfileName=profile_name,
-                RoleName=role_name
-            )
-        print('Created instance profile: ' + profile_name)
-        return create_instance_profile_response['InstanceProfile']
+
+    if role_name:
+        iam_client.add_role_to_instance_profile(
+            InstanceProfileName=profile_name,
+            RoleName=role_name
+        )
+    print('Created instance profile: ' + profile_name)
+    return create_instance_profile_response['InstanceProfile']
 
 
 def create_policy(policy_name, document):
@@ -191,13 +123,12 @@ def create_policy(policy_name, document):
     try:
         iam_client.create_policy(PolicyName=policy_name
                                  , PolicyDocument=document)
+        print('Created policy: ' + policy_name)
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
             print('Policy already exists ' + policy_name)
         else:
             raise e
-    else:
-        print('Created policy: ' + policy_name)
 
 
 def create_role(role_name, trust_policy, *policies):
@@ -213,17 +144,18 @@ def create_role(role_name, trust_policy, *policies):
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
             print('Role already exists ' + role_name)
+            return
         else:
             raise e
-    else:
-        for policy in policies:
-            if not policy:
-                continue
-            iam_client.attach_role_policy(
-                RoleName=role_name,
-                PolicyArn=policy.arn
-            )
-        print('Created role: ' + role_name)
+
+    for policy in policies:
+        if not policy:
+            continue
+        iam_client.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn=policy.arn
+        )
+    print('Created role: ' + role_name)
     return iam_resource.Role(role_name)
 
 
@@ -261,13 +193,12 @@ def cancel_spot_request(project_id):
 
     try:
         ec2_client.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
+        print('Spot requests cancelled')
     except ClientError as e:
         if e.response['Error']['Code'] == 'InvalidParameterCombination':
             print('No spot requests to cancel')
         else:
             raise e
-
-    print('Spot requests cancelled')
 
 
 def terminate_instances(project_id):
@@ -415,157 +346,6 @@ def delete_policy(policy):
             raise e
 
     print('Successfully deleted Policy:', policy_name)
-
-
-def create_lambda_function(project_id, project, role, bucket_name, zip_file_name):
-
-    function_name = project_id + '-scheduler'
-
-    try:
-        lambda_client.create_function(FunctionName=function_name
-                                      , Runtime='python3.6'
-                                      , Handler='scheduler.run'
-                                      , Role=role.arn
-                                      , Code={'S3Bucket': bucket_name
-                                              , 'S3Key': zip_file_name}
-                                      , Timeout=30
-                                      , Environment={'Variables': {'project': project}}
-                                      , Tags={'bokchoi-id': project_id})
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceConflictException':
-            print('Scheduler already exists')
-        else:
-            raise e
-
-    return lambda_client.get_function_configuration(FunctionName=function_name)
-
-
-def create_scheduler(project_id, project, settings):
-    """ Creates scheduler. Creates Lambda source bundle, uploads and deploys function
-    and creates Cloudwatch Event to trigger scheduler based on specified schedule.
-    :param project_id:              Global project id
-    :param project:                 Project name
-    :param settings:                Project settings
-    """
-    print('Creating scheduler')
-
-    from bokchoi import scheduler
-
-    file_object = BytesIO()
-
-    requirements = settings.get('Requirements')
-
-    with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        zip_file.write(scheduler.__file__, 'scheduler.py')
-        zip_file.write(__file__, 'bokchoi/common.py')
-        zip_file.write(ec2.__file__, 'bokchoi/ec2.py')
-        zip_file.write(emr.__file__, 'bokchoi/emr.py')
-        zip_file.write('/'.join((os.getcwd(), 'bokchoi_settings.json')), 'bokchoi_settings.json')
-
-        zip_file.writestr('__init__.py', '')
-
-        if requirements:
-            zip_file.writestr('requirements.txt', '\n'.join(requirements))
-
-    file_object.seek(0)
-
-    bucket_name = project_id
-    zip_file_name = 'bokchoi-scheduler.zip'
-    upload_zip(bucket_name, file_object, zip_file_name, fingerprint='n/a')
-
-    scheduler_policy_name = project_id + '-scheduler-policy'
-    create_policy(scheduler_policy_name, SCHEDULER_POLICY)
-    scheduler_policy = next(get_policies(project_id, pattern=scheduler_policy_name))
-
-    scheduler_role_name = project_id + '-scheduler-role'
-    role = create_role(scheduler_role_name, SCHEDULER_TRUST_POLICY, scheduler_policy)
-
-    # AWS has some specific demands on cron schedule:
-    # http://docs.aws.amazon.com/lambda/latest/dg/tutorial-scheduled-events-schedule-expressions.html
-    lambda_function = retry(create_lambda_function
-                            , project_id=project_id
-                            , project=project
-                            , role=role
-                            , bucket_name=bucket_name
-                            , zip_file_name=zip_file_name)
-
-    event_policy_name = project_id + '-event-policy'
-    create_policy(event_policy_name, EVENT_POLICY)
-    event_policy = next(get_policies(project_id, pattern=event_policy_name))
-
-    event_role_name = project_id + '-event-role'
-    event_role = create_role(event_role_name, EVENT_TRUST_POLICY, event_policy)
-
-    schedule = settings['Schedule']
-    create_cloudwatch_rule(project_id, schedule, event_role.arn, lambda_function['FunctionArn'])
-
-
-def delete_scheduler(project_id):
-    """ Deletes scheduler
-    :param project_id:              Global project id
-    """
-    try:
-        lambda_client.delete_function(FunctionName=project_id + '-scheduler')
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
-            print('Function does not exist')
-        else:
-            raise e
-
-
-def create_cloudwatch_rule(project_id, schedule, role_arn, function_arn):
-    """ Creates Cloudwatch rule (event) that will trigger lambda function
-    :param project_id:              Global project id
-    :param schedule:                Event schedule
-    :param role_arn:                ARN of role to assign to rule
-    :param function_arn:            ARN of Lambda function to trigger
-    """
-    print('Scheduling job using ' + schedule)
-    rule_name = project_id + '-schedule-event'
-    retry(events_client.put_rule
-          , Name=rule_name
-          , ScheduleExpression=schedule
-          , State='ENABLED'
-          , RoleArn=role_arn)
-
-    events_client.put_targets(Rule=rule_name
-                              , Targets=[{'Arn': function_arn, 'Id': '0'}])
-
-    function_name = project_id + '-scheduler'
-    try:
-        lambda_client.add_permission(
-            FunctionName=function_name,
-            StatementId='0',
-            Action='lambda:InvokeFunction',
-            Principal='events.amazonaws.com'
-        )
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceConflictException':
-            print('Scheduler rule already exists')
-        else:
-            raise e
-
-
-def delete_cloudwatch_rule(rule_name):
-    """ Delete Cloudwatch rule (event). First removes all targets
-    :param rule_name:               Name of rule to remove
-    """
-    try:
-        events_client.remove_targets(Rule=rule_name
-                                     , Ids=['0'])
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
-            print('No targets to remove from rule')
-        else:
-            raise e
-
-    try:
-        events_client.delete_rule(Name=rule_name)
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
-            print('Cloudwatch rule does not exist')
-        else:
-            raise e
 
 
 def create_project_id(project, vendor_specific_id):

@@ -9,6 +9,7 @@ import time
 import boto3
 
 from bokchoi import common
+from bokchoi.scheduler import Scheduler
 
 
 class EMR(object):
@@ -24,7 +25,11 @@ class EMR(object):
     def schedule(self):
         """Schedule task"""
         if self.settings.get('Schedule'):
-            common.create_scheduler(self.project_id, self.project_name, self.settings)
+            scheduler = Scheduler(self.project_id
+                                  , self.project_name
+                                  , self.settings.get('Schedule')
+                                  , self.settings.get('Requirements'))
+            scheduler.deploy()
 
     def deploy(self):
         """Zip package and deploy to S3 so it can be used by EMR"""
@@ -34,7 +39,7 @@ class EMR(object):
         package, fingerprint = common.zip_package(cwd, self.settings.get('Requirements'))
 
         package_name = 'bokchoi-' + self.project_name + '.zip'
-        common.upload_zip(bucket_name, package, package_name, fingerprint)
+        common.upload_to_s3(bucket_name, package, package_name, fingerprint)
         self.schedule()
 
     def run(self):
@@ -61,8 +66,12 @@ class EMR(object):
 
         # remove s3 bucket
         common.delete_bucket(self.project_id)
-        common.delete_scheduler(self.project_id)
-        common.delete_cloudwatch_rule(self.project_id + '-schedule-event')
+
+        scheduler = Scheduler(self.project_id
+                              , self.project_name
+                              , self.settings.get('Schedule')
+                              , self.settings.get('Requirements'))
+        scheduler.undeploy()
 
     def start_spark_cluster(self, emr_client):
         """
