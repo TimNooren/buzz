@@ -144,7 +144,7 @@ def create_role(role_name, trust_policy, *policies):
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
             print('Role already exists ' + role_name)
-            return
+            return iam_resource.Role(role_name)
         else:
             raise e
 
