@@ -7,7 +7,6 @@ import boto3
 from botocore.exceptions import ClientError
 
 from bokchoi import common
-from bokchoi import ec2, emr, scheduler_lambda
 
 session = boto3.Session()
 
@@ -135,11 +134,13 @@ class Scheduler:
 
     def zip_package(self, requirements=None):
 
+        from bokchoi import ec2, emr, common, scheduler_lambda
+
         file_object = BytesIO()
 
         with zipfile.ZipFile(file_object, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.write(scheduler_lambda.__file__, 'scheduler_lambda.py')
-            zip_file.write(__file__, 'bokchoi/common.py')
+            zip_file.write(common.__file__, 'bokchoi/common.py')
             zip_file.write(ec2.__file__, 'bokchoi/ec2.py')
             zip_file.write(emr.__file__, 'bokchoi/emr.py')
             zip_file.write('/'.join((os.getcwd(), 'bokchoi_settings.json')), 'bokchoi_settings.json')
@@ -215,9 +216,7 @@ class Scheduler:
                 raise e
 
     def delete_cloudwatch_rule(self):
-        """ Delete Cloudwatch rule (event). First removes all targets
-        :param rule_name:               Name of rule to remove
-        """
+        """ Delete Cloudwatch rule (event). First removes all targets"""
         try:
             events_client.remove_targets(Rule=self.rule_name
                                          , Ids=['0'])
