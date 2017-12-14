@@ -143,9 +143,13 @@ class Scheduler:
             zip_file.write(common.__file__, 'bokchoi/common.py')
             zip_file.write(ec2.__file__, 'bokchoi/ec2.py')
             zip_file.write(emr.__file__, 'bokchoi/emr.py')
+            zip_file.write(emr.__file__, 'bokchoi/scheduler.py')
             zip_file.write('/'.join((os.getcwd(), 'bokchoi_settings.json')), 'bokchoi_settings.json')
 
             zip_file.writestr('__init__.py', '')
+            info = zipfile.ZipInfo('bokchoi/__init__.py')
+            info.external_attr = 0o777 << 16  # give full access to included file
+            zip_file.writestr(info, '')
 
             if requirements:
                 zip_file.writestr('requirements.txt', '\n'.join(requirements))
@@ -186,7 +190,6 @@ class Scheduler:
 
     def create_cloudwatch_rule(self, schedule, role_arn, function_arn):
         """ Creates Cloudwatch rule (event) that will trigger lambda function
-        :param project_id:              Global project id
         :param schedule:                Event schedule
         :param role_arn:                ARN of role to assign to rule
         :param function_arn:            ARN of Lambda function to trigger

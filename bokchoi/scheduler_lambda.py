@@ -4,7 +4,7 @@ Schedule tasks using lambda and cloudwatch
 
 import os
 
-PROJECT = os.environ.get('project')
+PROJECT = os.environ.get('project_name')
 
 
 def run(event, context):

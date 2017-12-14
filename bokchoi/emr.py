@@ -9,7 +9,6 @@ import time
 import boto3
 
 from bokchoi import common
-from bokchoi.scheduler import Scheduler
 
 
 class EMR(object):
@@ -25,6 +24,9 @@ class EMR(object):
     def schedule(self):
         """Schedule task"""
         if self.settings.get('Schedule'):
+
+            from bokchoi.scheduler import Scheduler
+
             scheduler = Scheduler(self.project_id
                                   , self.project_name
                                   , self.settings.get('Schedule')
@@ -66,6 +68,8 @@ class EMR(object):
 
         # remove s3 bucket
         common.delete_bucket(self.project_id)
+
+        from bokchoi.scheduler import Scheduler
 
         scheduler = Scheduler(self.project_id
                               , self.project_name

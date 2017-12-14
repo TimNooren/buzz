@@ -6,7 +6,6 @@ import os
 from base64 import b64encode
 
 from bokchoi import common
-from bokchoi.scheduler import Scheduler
 
 USER_DATA = """#!/bin/bash
 
@@ -92,6 +91,9 @@ class EC2(object):
         self.create_default_role_and_profile(policies)
 
         if self.settings.get('Schedule'):
+
+            from bokchoi.scheduler import Scheduler
+
             scheduler = Scheduler(self.project_id
                                   , self.project_name
                                   , self.settings.get('Schedule')
@@ -114,6 +116,8 @@ class EC2(object):
 
         for role in common.get_roles(self.project_id):
             common.delete_role(role)
+
+        from bokchoi.scheduler import Scheduler
 
         scheduler = Scheduler(self.project_id
                               , self.project_name
