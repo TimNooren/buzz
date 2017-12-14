@@ -100,13 +100,13 @@ class EC2(object):
                                   , self.settings.get('Requirements'))
             scheduler.deploy()
 
-    def undeploy(self):
+    def undeploy(self, dryrun):
         """Deletes all policies, users, and instances permanently"""
 
         common.cancel_spot_request(self.project_id)
-        common.terminate_instances(self.project_id)
+        common.terminate_instances(self.project_id, dryrun)
 
-        common.delete_bucket(self.project_id)
+        common.delete_bucket(self.project_id, dryrun)
 
         for policy in common.get_policies(self.project_id):
             common.delete_policy(policy)

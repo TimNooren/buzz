@@ -207,8 +207,8 @@ def terminate_instances(project_id, dryrun=True):
     :param dryrun:                  If True list instances that would be terminated
     """
     print('\nTerminating instances')
-    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)],
-                'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]},
+               {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
     instances = ec2_resource.instances.filter(Filters=filters)
 
     if dryrun:
@@ -220,13 +220,18 @@ def terminate_instances(project_id, dryrun=True):
         print('Instances terminated')
 
 
-def delete_bucket(project_id):
+def delete_bucket(project_id, dryrun=True):
     """ Delete Bokchoi deploy bucket. Removes all object it contains.
     :param project_id:              Global project id
+    :param dryrun:                  If True list bucket that would be terminated
     """
     print('\nDelete Bucket')
 
     bucket = s3_resource.Bucket(project_id)
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted bucket ' + bucket.name)
+        return
 
     try:
         bucket.objects.delete()

@@ -43,8 +43,9 @@ def deploy(ctx):
 
 
 @cli.command('undeploy')
+@click.option('--dryrun', is_flag=True, default=False, help="Print in stead of terminate")
 @click.pass_obj
-def undeploy(ctx):
+def undeploy(ctx, dryrun):
     """Default undeploy command"""
-    ctx.undeploy()
+    ctx.undeploy(dryrun)
     click.secho('Undeployed', fg='green')
