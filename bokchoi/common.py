@@ -201,14 +201,23 @@ def cancel_spot_request(project_id):
             raise e
 
 
-def terminate_instances(project_id):
+def terminate_instances(project_id, dryrun=True):
     """ Terminates instances. Instances are found by filtering on project_id tag.
     :param project_id:              Global project id
+    :param dryrun:                  If True list instances that would be terminated
     """
     print('\nTerminating instances')
-    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]}]
-    ec2_resource.instances.filter(Filters=filters).terminate()
-    print('Instances terminated')
+    filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)],
+                'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
+    instances = ec2_resource.instances.filter(Filters=filters)
+
+    if dryrun:
+        print('Dryrun flag set. Would have terminated following instances:')
+        for instance in instances:
+            print(instance)
+    else:
+        instances.terminate()
+        print('Instances terminated')
 
 
 def delete_bucket(project_id):
