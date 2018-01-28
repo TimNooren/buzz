@@ -194,6 +194,7 @@ def cancel_spot_request(project_id, dryrun):
 
     if dryrun:
         print('Dryrun flag set. Would have cancelled spot requests ' + ', '.join(spot_request_ids))
+        return
 
     try:
         ec2_client.cancel_spot_instance_requests(SpotInstanceRequestIds=spot_request_ids)
