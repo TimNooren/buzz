@@ -103,19 +103,19 @@ class EC2(object):
     def undeploy(self, dryrun):
         """Deletes all policies, users, and instances permanently"""
 
-        common.cancel_spot_request(self.project_id)
+        common.cancel_spot_request(self.project_id, dryrun)
         common.terminate_instances(self.project_id, dryrun)
 
         common.delete_bucket(self.project_id, dryrun)
 
         for policy in common.get_policies(self.project_id):
-            common.delete_policy(policy)
+            common.delete_policy(policy, dryrun)
 
         for instance_profile in common.get_instance_profiles(self.project_id):
-            common.delete_instance_profile(instance_profile)
+            common.delete_instance_profile(instance_profile, dryrun)
 
         for role in common.get_roles(self.project_id):
-            common.delete_role(role)
+            common.delete_role(role, dryrun)
 
         from bokchoi.scheduler import Scheduler
 
@@ -123,7 +123,7 @@ class EC2(object):
                               , self.project_name
                               , self.settings.get('Schedule')
                               , self.settings.get('Requirements'))
-        scheduler.undeploy()
+        scheduler.undeploy(dryrun)
 
     def run(self):
         """Create EC2 machine with given AMI and instance settings"""

@@ -121,10 +121,10 @@ class Scheduler:
 
         self.create_cloudwatch_rule(self.schedule, event_role.arn, lambda_function['FunctionArn'])
 
-    def undeploy(self):
+    def undeploy(self, dryrun):
 
-        self.delete_lambda_function()
-        self.delete_cloudwatch_rule()
+        self.delete_lambda_function(dryrun)
+        self.delete_cloudwatch_rule(dryrun)
 
     def create_role(self, project_id, role_name, trust_policy, policy_name, policy):
         common.create_policy(policy_name, policy)
@@ -151,8 +151,8 @@ class Scheduler:
             info.external_attr = 0o777 << 16  # give full access to included file
             zip_file.writestr(info, '')
 
-            if requirements:
-                zip_file.writestr('requirements.txt', '\n'.join(requirements))
+            requirements = requirements or ''
+            zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
         file_object.seek(0)
 
@@ -178,8 +178,13 @@ class Scheduler:
 
         return lambda_client.get_function_configuration(FunctionName=self.function_name)
 
-    def delete_lambda_function(self):
+    def delete_lambda_function(self, dryrun):
         """ Deletes scheduler lambda function"""
+
+        if dryrun:
+            print('Dryrun flag set. Would have deleted scheduler')
+            return
+
         try:
             lambda_client.delete_function(FunctionName=self.function_name)
         except ClientError as e:
@@ -218,8 +223,13 @@ class Scheduler:
             else:
                 raise e
 
-    def delete_cloudwatch_rule(self):
+    def delete_cloudwatch_rule(self, dryrun):
         """ Delete Cloudwatch rule (event). First removes all targets"""
+
+        if dryrun:
+            print('Dryrun flag set. Would have deleted cloudwatch rule')
+            return
+
         try:
             events_client.remove_targets(Rule=self.rule_name
                                          , Ids=['0'])

@@ -51,23 +51,23 @@ class EMR(object):
         self.step_prepare_env(emr_client)
         self.step_spark_submit(emr_client)
 
-    def undeploy(self):
+    def undeploy(self, dryrun):
         """Deletes all policies, users, and instances permanently"""
 
-        common.cancel_spot_request(self.project_id)
-        common.terminate_instances(self.project_id)
+        common.cancel_spot_request(self.project_id, dryrun)
+        common.terminate_instances(self.project_id, dryrun)
 
         for pol in common.get_policies(self.project_id):
-            common.delete_policy(pol)
+            common.delete_policy(pol, dryrun)
 
         for prof in common.get_instance_profiles(self.project_id):
-            common.delete_instance_profile(prof)
+            common.delete_instance_profile(prof, dryrun)
 
         for role in common.get_roles(self.project_id):
-            common.delete_role(role)
+            common.delete_role(role, dryrun)
 
         # remove s3 bucket
-        common.delete_bucket(self.project_id)
+        common.delete_bucket(self.project_id, dryrun)
 
         from bokchoi.scheduler import Scheduler
 
@@ -75,7 +75,7 @@ class EMR(object):
                               , self.project_name
                               , self.settings.get('Schedule')
                               , self.settings.get('Requirements'))
-        scheduler.undeploy()
+        scheduler.undeploy(dryrun)
 
     def start_spark_cluster(self, emr_client):
         """
