@@ -400,8 +400,8 @@ def zip_package(path, requirements=None):
                 fn = os.path.join(base, file_name)
                 zip_file.write(fn, fn[rootlen:])
 
-        if requirements:
-            zip_file.writestr('requirements.txt', '\n'.join(requirements))
+        requirements = requirements or ''
+        zip_file.writestr('requirements.txt', '\n'.join(requirements))
 
         fingerprint = '|'.join([str(elem.CRC) for elem in zip_file.infolist()])
 
