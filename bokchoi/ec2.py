@@ -2,10 +2,12 @@
 """
 Class which can be used to deploy and run EC2 spot instances
 """
-import os
 from base64 import b64encode
+import paramiko
+import subprocess
+import os
 
-from bokchoi import common
+from bokchoi import common, forward
 
 USER_DATA = """#!/bin/bash
 
@@ -23,11 +25,26 @@ python3 -c "import zipfile; zf = zipfile.ZipFile('/tmp/{package}'); zf.extractal
 curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3
 [ -f /tmp/requirements.txt ] && pip3 install -r /tmp/requirements.txt
 
-# Run app
-cd /tmp
-python3 -c "import {app}; {app}.{entry}();"
-aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
-shutdown -h now
+if [ "{notebook}" = "True" ]
+then
+    #Add public key
+    echo "ssh-rsa {public_key}" >> /home/ubuntu/.ssh/authorized_keys
+    #Install Jupyter
+    pip3 install jupyter
+    pip3 install tornado==4.5.2
+    echo "c.NotebookApp.token = u''" >> ~/.jupyter/jupyter_notebook_config.py
+    jupyter notebook --no-browser --allow-root --ip=0.0.0.0 --port=8889 --NotebookApp.token=
+else
+    # Run app
+    cd /tmp
+    python3 -c "import {app}; {app}.{entry}();"
+    aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
+fi
+
+if [ "{shutdown}" = "True" ]
+then
+    shutdown -h now
+fi
 """
 
 DEFAULT_TRUST_POLICY = """{
@@ -71,6 +88,8 @@ class EC2(object):
         self.launch_config = settings.get('EC2')
         self.custom_policy = settings.get('CustomPolicy')
 
+        self.shutdown = settings.get('Shutdown', True)
+
         aws_account_id = common.get_aws_account_id()
         self.project_id = common.create_project_id(project, aws_account_id)
         self.package_name = 'bokchoi-' + self.project_name + '.zip'
@@ -90,6 +109,15 @@ class EC2(object):
 
         self.create_default_role_and_profile(policies)
 
+        if self.settings.get('Notebook'):
+            common.create_security_group(self.project_id + '-default'
+                                         , self.project_id
+                                         , {'CidrIp': common.get_my_ip() + '/32'
+                                            , 'FromPort': 22
+                                            , 'ToPort': 22
+                                            , 'IpProtocol': 'tcp'}
+                                         )
+
         if self.settings.get('Schedule'):
 
             from bokchoi.scheduler import Scheduler
@@ -104,7 +132,9 @@ class EC2(object):
         """Deletes all policies, users, and instances permanently"""
 
         common.cancel_spot_request(self.project_id, dryrun)
-        common.terminate_instances(self.project_id, dryrun)
+
+        for instance in common.get_instances(self.project_id):
+            common.terminate_instance(instance, dryrun)
 
         common.delete_bucket(self.project_id, dryrun)
 
@@ -116,6 +146,9 @@ class EC2(object):
 
         for role in common.get_roles(self.project_id):
             common.delete_role(role, dryrun)
+
+        for group in common.get_security_groups(self.project_id):
+            common.delete_security_group(group, dryrun)
 
         from bokchoi.scheduler import Scheduler
 
@@ -131,11 +164,28 @@ class EC2(object):
 
         bucket_name = self.project_id
 
+        if self.settings.get('Notebook'):
+            public_key = self.get_ssh_keys()
+        else:
+            public_key = ''
+
         app, entry = self.entry_point.split('.')
-        user_data = USER_DATA.format(bucket=bucket_name, package=self.package_name, app=app, entry=entry)
+        user_data = USER_DATA.format(bucket=bucket_name
+                                     , package=self.package_name
+                                     , app=app
+                                     , entry=entry
+                                     , public=public_key
+                                     , shutdown=self.shutdown
+                                     , notebook=self.settings.get('Notebook')
+                                     , public_key=public_key)
+
         self.launch_config['LaunchSpecification']['UserData'] = b64encode(user_data.encode('ascii')).decode('ascii')
 
         self.launch_config['LaunchSpecification']['IamInstanceProfile'] = {'Name': self.project_id + '-default-role'}
+
+        if self.settings.get('Notebook'):
+            security_group = next(common.get_security_groups(self.project_id, self.project_id + '-default'))
+            self.launch_config['LaunchSpecification']['SecurityGroupIds'] = [security_group.group_id]
 
         common.request_spot_instances(self.project_id, self.launch_config)
 
@@ -166,3 +216,29 @@ class EC2(object):
             policies.append(next(common.get_policies(custom_policy_name)))
 
         return policies
+
+    def connect(self):
+        """Set up port forwarding for ipython notebook server"""
+        instance = next(common.get_instances(self.project_id))
+        key_file = '~/.ssh/' + self.project_id
+        forward.forward(8888, instance.public_ip_address, 8889, 'ubuntu', key_file)
+        print('Notebook running at: http://localhost:8888')
+
+    def get_ssh_keys(self):
+        """Get private and public keys. Create if not exists."""
+        key_file = '~/.ssh/' + self.project_id
+        try:
+            priv = paramiko.RSAKey.from_private_key_file(key_file)
+        except FileNotFoundError:
+            priv = paramiko.RSAKey.generate(2048)
+            priv.write_private_key_file(key_file)
+        pub = priv.get_base64()
+        return pub
+
+    def stop(self):
+        """Stop all running instances"""
+        dryrun = False
+        common.cancel_spot_request(self.project_id, dryrun)
+
+        for instance in common.get_instances(self.project_id):
+            common.terminate_instance(instance, dryrun)
