@@ -16,7 +16,9 @@ setup(
     install_requires=[
         'Click',
         'boto3',
-        'botocore'
+        'botocore',
+        'paramiko',
+        'requests'
     ],
     url='https://github.com/TimNooren/bokchoi',
     author='Tim Nooren',
