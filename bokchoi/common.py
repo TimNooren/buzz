@@ -5,6 +5,7 @@ import zipfile
 import os
 import json
 import hashlib
+import requests
 
 import boto3
 from botocore.exceptions import ClientError
@@ -87,6 +88,61 @@ def retry(func, **kwargs):
             sleep(1)
 
     raise TimeoutError()
+
+
+def create_security_group(group_name, project_id, *rules):
+    try:
+        group = ec2_resource.create_security_group(
+            Description='Bokchoi default security group',
+            GroupName=group_name
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
+            print('Security group already exists ' + group_name)
+            return
+        else:
+            raise e
+
+    group.create_tags(Tags=[{'Key': 'bokchoi-id', 'Value': project_id}])
+    for rule in rules:
+        group.authorize_ingress(**rule)
+    print('Created security group: ' + group_name)
+    return group
+
+
+def get_security_groups(project_id, *group_names):
+    response = ec2_client.describe_security_groups(
+        Filters=[
+            {
+                'Name': 'tag-key',
+                'Values': ['bokchoi-id']
+            },
+            {
+                'Name': 'tag-value',
+                'Values': [project_id]
+            }
+        ],
+        GroupNames=[*group_names]
+    )
+
+    for group in response['SecurityGroups']:
+        yield ec2_resource.SecurityGroup(group['GroupId'])
+
+
+def delete_security_group(group, dryrun=True):
+
+    if dryrun:
+        print('Dryrun flag set. Would have deleted security group ' + group.group_name)
+        return
+
+    group_name = group.group_name
+    group.delete()
+
+    print('Deleted security group ' + group_name)
+
+
+def get_my_ip():
+    return requests.get('https://api.ipify.org/').text
 
 
 def create_instance_profile(profile_name, role_name=None):
@@ -206,23 +262,31 @@ def cancel_spot_request(project_id, dryrun):
             raise e
 
 
-def terminate_instances(project_id, dryrun=True):
-    """ Terminates instances. Instances are found by filtering on project_id tag.
-    :param project_id:              Global project id
-    :param dryrun:                  If True list instances that would be terminated
+def get_instances(project_id):
+    """ Returns all instances for project. Instances are found by filtering on project_id tag
+    :param project_id:
+    :return:
     """
-    print('\nTerminating instances')
     filters = [{'Name': 'tag:bokchoi-id', 'Values': [str(project_id)]},
                {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']}]
-    instances = ec2_resource.instances.filter(Filters=filters)
+    for instance in ec2_resource.instances.filter(Filters=filters):
+        yield instance
+
+
+def terminate_instance(instance, dryrun=True):
+    """ Terminates instance.
+    :param instance:                ec2.Instance
+    :param dryrun:                  If True print instance that would be terminated
+    """
+    print('\nTerminating instances')
 
     if dryrun:
-        print('Dryrun flag set. Would have terminated following instances:')
-        for instance in instances:
-            print(instance)
-    else:
-        instances.terminate()
-        print('Instances terminated')
+        print('Dryrun flag set. Would have terminated instance: ' + instance.instance_id)
+        return
+
+    instance.terminate()
+    instance.wait_until_terminated()
+    print('Instance terminated')
 
 
 def delete_bucket(project_id, dryrun=True):
