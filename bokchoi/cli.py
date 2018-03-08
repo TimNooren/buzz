@@ -49,3 +49,17 @@ def undeploy(ctx, dryrun):
     """Default undeploy command"""
     ctx.undeploy(dryrun)
     click.secho('Undeployed', fg='green')
+
+
+@cli.command('connect')
+@click.pass_obj
+def connect(ctx):
+    """Default connect command"""
+    ctx.connect()
+
+
+@cli.command('stop')
+@click.pass_obj
+def stop(ctx):
+    """Default stop command"""
+    ctx.stop()
