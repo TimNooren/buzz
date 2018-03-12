@@ -3,11 +3,9 @@
 Class which can be used to deploy and run EC2 spot instances
 """
 from base64 import b64encode
-import paramiko
-import subprocess
 import os
 
-from bokchoi import common, forward
+from bokchoi import common, ssh
 
 USER_DATA = """#!/bin/bash
 
@@ -33,17 +31,16 @@ then
     pip3 install jupyter
     pip3 install tornado==4.5.2
     echo "c.NotebookApp.token = u''" >> ~/.jupyter/jupyter_notebook_config.py
-    jupyter notebook --no-browser --allow-root --ip=0.0.0.0 --port=8889 --NotebookApp.token=
+    jupyter notebook --no-browser --allow-root --ip=0.0.0.0 --port=8888 --NotebookApp.token=
 else
     # Run app
     cd /tmp
     python3 -c "import {app}; {app}.{entry}();"
     aws s3 cp /var/log/cloud-init-output.log s3://{bucket}/cloud-init-output.log
-fi
-
-if [ "{shutdown}" = "True" ]
-then
-    shutdown -h now
+    if [ "{shutdown}" = "True" ]
+    then
+        shutdown -h now
+    fi
 fi
 """
 
@@ -165,11 +162,15 @@ class EC2(object):
         bucket_name = self.project_id
 
         if self.settings.get('Notebook'):
-            public_key = self.get_ssh_keys()
+            public_key = ssh.get_ssh_keys(self.project_id)
         else:
             public_key = ''
 
-        app, entry = self.entry_point.split('.')
+        if self.entry_point:
+            app, entry = self.entry_point.split('.')
+        else:
+            app, entry = '', ''
+
         user_data = USER_DATA.format(bucket=bucket_name
                                      , package=self.package_name
                                      , app=app
@@ -220,20 +221,9 @@ class EC2(object):
     def connect(self):
         """Set up port forwarding for ipython notebook server"""
         instance = next(common.get_instances(self.project_id))
-        key_file = '~/.ssh/' + self.project_id
-        forward.forward(8888, instance.public_ip_address, 8889, 'ubuntu', key_file)
-        print('Notebook running at: http://localhost:8888')
-
-    def get_ssh_keys(self):
-        """Get private and public keys. Create if not exists."""
-        key_file = '~/.ssh/' + self.project_id
-        try:
-            priv = paramiko.RSAKey.from_private_key_file(key_file)
-        except FileNotFoundError:
-            priv = paramiko.RSAKey.generate(2048)
-            priv.write_private_key_file(key_file)
-        pub = priv.get_base64()
-        return pub
+        instance_ip = instance.public_ip_address or instance.private_ip_address
+        key_file = os.path.expanduser('~/.ssh/' + self.project_id)
+        ssh.forward(8888, instance_ip, 'ubuntu', key_file)
 
     def stop(self):
         """Stop all running instances"""
