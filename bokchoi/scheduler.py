@@ -109,6 +109,7 @@ class Scheduler:
                                           , self.project_id + '-scheduler-policy', SCHEDULER_POLICY)
 
         lambda_function = common.retry(self.create_lambda_function
+                                       , ClientError
                                        , project_id=self.project_id
                                        , project_name=self.project_name
                                        , role=scheduler_role
@@ -202,6 +203,7 @@ class Scheduler:
         print('Scheduling job using ' + schedule)
 
         common.retry(events_client.put_rule
+                     , ClientError
                      , Name=self.rule_name
                      , ScheduleExpression=schedule
                      , State='ENABLED'
@@ -246,6 +248,3 @@ class Scheduler:
                 print('Cloudwatch rule does not exist')
             else:
                 raise e
-
-if __name__ == '__main__':
-    scheduler = Scheduler('123', 'project', {})
