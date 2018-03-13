@@ -1,21 +1,29 @@
 """
-Sample script showing how to do local port forwarding over paramiko.
+Module contains functions related to SSH.
 
-This script connects to the requested SSH server and sets up local port
-forwarding (the openssh -L option) from a local port through a tunneled
-connection to a destination reachable from the SSH server machine.
+Most of this script is adapted from:
+https://github.com/paramiko/paramiko/blob/master/demos/forward.py
 """
-
+import webbrowser
 import select
 import os
 import socketserver
 
-import paramiko
+from paramiko import RSAKey, SSHClient, AutoAddPolicy
+from paramiko.ssh_exception import SSHException
 
-SSH_PORT = 22
+from bokchoi import common
+
+
+class ForwardServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 
 class Handler(socketserver.BaseRequestHandler):
+
+    ssh_transport = None
+    host_port = None
 
     def __init__(self, request, client_address, server):
         super(Handler, self).__init__(request, client_address, server)
@@ -54,39 +62,45 @@ def forward(local_port, remote_host, user_name, key_filename):
     :param key_filename:            Private key for ssh connection
     :return:                        -
     """
-    client = paramiko.SSHClient()
+    client = SSHClient()
     client.load_system_host_keys()
-    client.set_missing_host_key_policy(paramiko.WarningPolicy())
+    client.set_missing_host_key_policy(AutoAddPolicy())
 
     print('Connecting to ssh host {}:{} ...'.format(remote_host, 8888))
 
-    client.connect(hostname=remote_host
-                   , port=22
-                   , username=user_name
-                   , key_filename=key_filename)
+    common.retry(client.connect
+                 , SSHException
+                 , hostname=remote_host
+                 , port=22
+                 , username=user_name
+                 , key_filename=key_filename)
 
     class SubHandler(Handler):
         ssh_transport = client.get_transport()
         host_port = local_port
 
-    server = socketserver.ThreadingTCPServer(('localhost', local_port), SubHandler)
-    server.daemon_threads = True
-    server.allow_reuse_address = True
+    server = ForwardServer(('localhost', local_port), SubHandler)
 
     try:
-        print('Notebook running at: http://localhost:8888')
+        webbrowser.open('http://localhost:{}'.format(local_port))
         server.serve_forever()
     except KeyboardInterrupt:
+        server.shutdown()
+        server.server_close()
         print('Connection closed')
 
 
 def get_ssh_keys(project_id):
-    """Get private and public keys. Create if not exists."""
+    """Get private and public keys. Create if not exists.
+    :param project_id:          Project id used for private key name
+    :return:                    -
+    """
     key_file = os.path.expanduser('~/.ssh/' + project_id)
     try:
-        priv = paramiko.RSAKey.from_private_key_file(key_file)
+        priv = RSAKey.from_private_key_file(key_file)
     except FileNotFoundError:
-        priv = paramiko.RSAKey.generate(2048)
+        print('Could not find private key. Creating one.')
+        priv = RSAKey.generate(2048)
         priv.write_private_key_file(key_file)
     pub = priv.get_base64()
     return pub
