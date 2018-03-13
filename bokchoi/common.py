@@ -74,9 +74,10 @@ def upload_to_s3(bucket_name, file_object, file_name, fingerprint):
     bucket.put_object(Body=file_object, Key=file_name, Metadata={'fingerprint': fingerprint})
 
 
-def retry(func, **kwargs):
+def retry(func, exc, **kwargs):
     """ Retries boto3 function call in case a ClientError occurs
     :param func:                    Function to call
+    :param exc:                     Exception to catch
     :param kwargs:                  Parameters to pass to function
     :return:                        Function response
     """
@@ -84,7 +85,7 @@ def retry(func, **kwargs):
         try:
             response = func(**kwargs)
             return response
-        except ClientError:
+        except exc:
             sleep(1)
 
     raise TimeoutError()
